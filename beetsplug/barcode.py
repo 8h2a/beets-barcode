@@ -128,7 +128,7 @@ class Barcode(BeetsPlugin):
 
         for release in res['release-list']:
             try:
-                print("{}, {}, {}, {}, {}, {}, {}{}".format(
+                print(u"{}, {}, {}, {}, {}, {}, {}{}".format(
                     release['title'],
                     release['date'],
                     release['medium-track-count'],
