@@ -17,7 +17,6 @@ from collections import namedtuple
 requirements:
 sudo apt-get install libzbar0
 pip install pyzbar Pillow
-+ beets exact same version because i use internal stuff :(
 
 TODO:
     * print => debug log
