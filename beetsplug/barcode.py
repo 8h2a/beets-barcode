@@ -122,10 +122,34 @@ class Barcode(BeetsPlugin):
             'source_weight': 1.0,
         })
         self.register_listener('import_task_start', self.import_task_start)
+        self.register_listener('before_choose_candidate', self.before_choose)
 
     def import_task_start(self, task, session):
         items = task.items if task.is_album else [task.item]
         _process_items(items)
+
+    def before_choose(self, session, task):
+        """
+        Print a message with a list of mb-ids from scanned barcodes.
+        This is useful to quickly see if the chosen release is actually
+        the right one.
+        """
+        if task.candidates:  # list of AlbumMatch
+            mb_ids = Set()
+            for candidate in task.candidates:
+                tracks = candidate.mapping
+                paths = Set(map(lambda i: os.path.dirname(i.path), tracks))
+                for path in paths:
+                    if path in _matches:
+                        mb_ids.update(_matches[path])
+            if len(mb_ids) == 0:
+                return None
+            print("------------------------")
+            print("MB-IDs from barcode:")
+            for id in mb_ids:
+                print("--> {}".format(id))
+            print("------------------------")
+        return None
 
     def candidates(self, items, artist, album, va_likely):
         release_ids = _process_items(items)
