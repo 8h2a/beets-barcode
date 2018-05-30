@@ -142,7 +142,7 @@ class Barcode(BeetsPlugin):
         mb_ids = Set()
         candidates = Set()
         for candidate in task.candidates:
-            # TODO we don't have to check ALL candidates, 
+            # TODO we don't have to check ALL candidates,
             # because they all use the same file paths..
             tracks = candidate.mapping
             paths = Set(map(lambda i: os.path.dirname(i.path), tracks))
@@ -180,7 +180,10 @@ class Barcode(BeetsPlugin):
         for path in paths:
             if path in _matches:
                 release_ids.update(_matches[path])
-        dist.add_expr('album_id', album_info.album_id not in release_ids)
+
+        # Penalty only if we actually found barcodes for this path.
+        if len(release_ids) != 0:
+            dist.add_expr('album_id', album_info.album_id not in release_ids)
 
         return dist
 
@@ -192,13 +195,16 @@ class Barcode(BeetsPlugin):
         except:
             return None
 
-        for release in res['release-list']:
-            print(_get_debug_str(release))
+        release_list = res['release-list']
+        if len(release_list) > 1:
+            for release in release_list:
+                print(_get_debug_str(release))
+            return None
 
-        if len(res['release-list']) == 1:
+        if len(release_list) == 1:
             # only return a release if we have exactly one release:
             try:
-                return hooks.album_for_mbid(res['release-list'][0]['id'])
+                return hooks.album_for_mbid(release_list[0]['id'])
             except:
                 pass
 
