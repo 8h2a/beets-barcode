@@ -10,6 +10,8 @@ from PIL import Image
 from pyzbar.pyzbar import decode
 from pyzbar.pyzbar import ZBarSymbol
 from sets import Set
+from collections import namedtuple
+
 
 """
 requirements:
@@ -31,7 +33,10 @@ BARCODE_TYPES = [ZBarSymbol.EAN13,
                  ZBarSymbol.UPCA,   ZBarSymbol.UPCE,
                  ZBarSymbol.ISBN10, ZBarSymbol.ISBN13]
 
-_matches = {}  # dict: key = dirname, value = Set of mb-IDs
+MatchData = namedtuple('MatchData', ['barcodes', 'album_ids'])
+
+# dict: key = dirname, value = MatchData
+_matches = {}
 
 
 # utility function
@@ -74,7 +79,7 @@ def _process_items(items):
         if path not in _matches:
             paths_original.add(path)
         else:
-            release_ids.update(_matches[path])
+            release_ids.update(_matches[path].album_ids)
 
     # append parent paths (if they dont contain more (other) media files
     # other than those we already know about)
@@ -105,12 +110,12 @@ def _process_items(items):
         res = musicbrainzngs.search_releases(barcode=barcode, limit=30)
         if res['release-list']:
             for release in res['release-list']:
-                print(u"{} => {}".format(barcode, _get_debug_str(release)))
+                # print(u"{} => {}".format(barcode, _get_debug_str(release)))
                 release_ids.add(release['id'])
 
     # add those paths and MB-IDs to our global dict
     for path in paths_original:
-        _matches[path] = release_ids
+        _matches[path] = MatchData(barcodes, release_ids)
 
     return list(release_ids)
 
@@ -140,7 +145,7 @@ class Barcode(BeetsPlugin):
             return None
 
         mb_ids = Set()
-        candidates = Set()
+        barcodes = Set()
         for candidate in task.candidates:
             # TODO we don't have to check ALL candidates,
             # because they all use the same file paths..
@@ -148,11 +153,13 @@ class Barcode(BeetsPlugin):
             paths = Set(map(lambda i: os.path.dirname(i.path), tracks))
             for path in paths:
                 if path in _matches:
-                    mb_ids.update(_matches[path])
+                    mb_ids.update(_matches[path].album_ids)
+                    barcodes.update(_matches[path].barcodes)
         if len(mb_ids) == 0:
             return None
 
         print("------------------------")
+        print("Found barcodes: {}".format(' '.join(barcodes)))
         print("Candidates with matching IDs:")
         for index, candidate in enumerate(task.candidates):
             album_id = candidate.info.album_id
@@ -179,7 +186,7 @@ class Barcode(BeetsPlugin):
         release_ids = Set()
         for path in paths:
             if path in _matches:
-                release_ids.update(_matches[path])
+                release_ids.update(_matches[path].album_ids)
 
         # Penalty only if we actually found barcodes for this path.
         if len(release_ids) != 0:
