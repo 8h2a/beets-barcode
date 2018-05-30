@@ -1,3 +1,30 @@
+"""Adds barcode support to the autotagger. 
+Requires pyzbar, PIL/Pillow, (and libzbar0).
+
+This plugin allows entering barcode as IDs to find the exact release
+and it also searches all image files for barcodes to help in selecting
+the correct release.
+If it finds a barcode, it gets the release-id from musicbrainz and 
+penalizes releases which don't correspond to the found barcode(s).
+
+requirements:
+sudo apt-get install libzbar0
+pip install pyzbar Pillow
+
+TODO:
+    * if no barcode found: check if there are different releases in that release group.
+        if yes, tell the user to consider providing a barcode/ID
+    * search on discogs (if not found on mb)
+        or more generic: just make beets call the album_for_id() for all the plugins!
+         + fix discogs plugin to allow searching for barcode
+    * documentation
+    * proper beetsplug thingy so it can be installed easier
+    * release (pip, installation instructions)?
+
+    * print => debug log?
+    * settings (extensions (tiff,bmp,etc), verbosity, path stuff?)
+    * maybe beets.ui.get_path_formats (see beets-copyartifacts)    
+"""
 from beets.autotag import hooks
 from beets.plugins import BeetsPlugin
 from beets.ui.commands import PromptChoice
@@ -12,34 +39,19 @@ from pyzbar.pyzbar import ZBarSymbol
 from sets import Set
 from collections import namedtuple
 
-
-"""
-requirements:
-sudo apt-get install libzbar0
-pip install pyzbar Pillow
-
-TODO:
-    * print => debug log
-    * proper beetsplug thingy so it can be installed easier
-    * release (pip, installation instructions)?
-    * settings (extensions (tiff,bmp,etc), verbosity, path stuff?)
-    * maybe beets.ui.get_path_formats (see beets-copyartifacts)
-    * documentation
-"""
-
 PICTURE_TYPES = ("jpg", "jpeg", "png")
 BARCODE_TYPES = [ZBarSymbol.EAN13,
                  ZBarSymbol.UPCA,   ZBarSymbol.UPCE,
                  ZBarSymbol.ISBN10, ZBarSymbol.ISBN13]
 
 MatchData = namedtuple('MatchData', ['barcodes', 'album_ids'])
-
-# dict: key = dirname, value = MatchData
-_matches = {}
-
+_matches = {}  # dict: key = dirname, value = MatchData
 
 # utility function
 def _get_files(paths, types):
+    """Gets all files (file names) with a specific type (file extension) 
+    in the provided path(s) and all their sub-directories.
+    """
     files = Set()
     for path in paths:
         for dirpath, dirnames, filenames in os.walk(path):
@@ -56,6 +68,9 @@ def _get_files(paths, types):
 
 
 def _get_debug_str(musicbrainzngs_release):
+    """Gets a string with more information (disambig_string) from a 
+    musicbrainzngs release object.
+    """
     release = musicbrainzngs_release
     url_prefix = "https://musicbrainz.org/release/"
     albuminfo = hooks.album_for_mbid(release['id'])
@@ -68,6 +83,13 @@ def _get_debug_str(musicbrainzngs_release):
 
 
 def _process_items(items):
+    """Find barcodes from image files from the provided list of items.
+    Used in import_task_start to populate the global dictionary "_matches"
+    with path/barcode/release-id combinations,
+    which are then later used during the autotagging candidate search.
+    The function will not re-scan already processed paths, instead it will
+    simply look up the values from "_matches".
+    """
     release_ids = Set()
 
     # get paths from music tracks
@@ -133,10 +155,9 @@ class Barcode(BeetsPlugin):
         _process_items(items)
 
     def before_choose(self, session, task):
-        """
-        Print a message with a list of mb-ids from scanned barcodes.
-        This is useful to quickly see if the chosen release is actually
-        the right one.
+        """Prints a helpful message to tell which candidate corresponds to the
+        scanned barcodes.
+        This is useful to quickly see if the chosen release is the correct one.
         """
 
         # task.candidates = list of AlbumMatch
@@ -161,9 +182,12 @@ class Barcode(BeetsPlugin):
         print("Found barcodes: {}".format(' '.join(barcodes)))
         print("Candidates with matching IDs:")
         for index, candidate in enumerate(task.candidates):
-            album_id = candidate.info.album_id
-            if album_id in mb_ids:
-                print("{:2d}. {}".format(index + 1, album_id))
+            if candidate.info.album_id in mb_ids:
+                print("{:2d}. {} {}".format(
+                    index + 1, 
+                    candidate.info.album_id,
+                    disambig_string(candidate.info)
+                ))
         print("------------------------")
 
         return None
@@ -180,20 +204,25 @@ class Barcode(BeetsPlugin):
     def album_distance(self, items, album_info, mapping):
         dist = hooks.Distance()
 
-        # penalty if no barcode or id not from barcode
+        # Add a penalty if these items have a barcode, but the album_id
+        # is does not correspond to the barcode(s).
         paths = Set(map(lambda i: os.path.dirname(i.path), items))
         release_ids = Set()
         for path in paths:
             if path in _matches:
                 release_ids.update(_matches[path].album_ids)
 
-        # Penalty only if we actually found barcodes for this path.
+        # Penalty only if we actually found barcodes for this path,
+        # to avoid penalizing all relases if we haven't found any barcodes.
         if len(release_ids) != 0:
             dist.add_expr('album_id', album_info.album_id not in release_ids)
 
         return dist
 
     def album_for_id(self, album_id):
+        """Looks up the barcode in the musicbrainz database and returns the
+        matching album (if the barcode corresponds to exactly one release).
+        """
         try:
             res = musicbrainzngs.search_releases(barcode=album_id, limit=30)
             if not res['release-list']:
