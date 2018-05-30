@@ -134,21 +134,32 @@ class Barcode(BeetsPlugin):
         This is useful to quickly see if the chosen release is actually
         the right one.
         """
-        if task.candidates:  # list of AlbumMatch
-            mb_ids = Set()
-            for candidate in task.candidates:
-                tracks = candidate.mapping
-                paths = Set(map(lambda i: os.path.dirname(i.path), tracks))
-                for path in paths:
-                    if path in _matches:
-                        mb_ids.update(_matches[path])
-            if len(mb_ids) == 0:
-                return None
-            print("------------------------")
-            print("MB-IDs from barcode:")
-            for id in mb_ids:
-                print("--> {}".format(id))
-            print("------------------------")
+
+        # task.candidates = list of AlbumMatch
+        if not task.candidates:
+            return None
+
+        mb_ids = Set()
+        candidates = Set()
+        for candidate in task.candidates:
+            # TODO we don't have to check ALL candidates, 
+            # because they all use the same file paths..
+            tracks = candidate.mapping
+            paths = Set(map(lambda i: os.path.dirname(i.path), tracks))
+            for path in paths:
+                if path in _matches:
+                    mb_ids.update(_matches[path])
+        if len(mb_ids) == 0:
+            return None
+
+        print("------------------------")
+        print("Candidates with matching IDs:")
+        for index, candidate in enumerate(task.candidates):
+            album_id = candidate.info.album_id
+            if album_id in mb_ids:
+                print("{:2d}. {}".format(index + 1, album_id))
+        print("------------------------")
+
         return None
 
     def candidates(self, items, artist, album, va_likely):
