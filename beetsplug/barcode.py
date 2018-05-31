@@ -1,11 +1,15 @@
 """Adds barcode support to the autotagger.
 Requires pyzbar, PIL/Pillow, (and libzbar0).
 
-This plugin allows entering barcode as IDs to find the exact release
-and it also searches all image files for barcodes to help in selecting
-the correct release.
+This plugin searches all image files for barcodes to help in selecting the
+correct release. It's also possible to manually enter a barcode number or
+catalogue number.
+
 If it finds a barcode, it gets the release-id from musicbrainz and
 penalizes releases which don't correspond to the found barcode(s).
+Whenever it finds a barcode, it will print a helpful message, before the
+candidates are shown, to help understanding which candidate corresponds to
+a barcode that was found.
 
 requirements:
 sudo apt-get install libzbar0
@@ -17,12 +21,12 @@ TODO:
     * release (pip, installation instructions)?
 
 TODO LATER:
+    * TOC => musicbrainzngs.get_releases_by_discid
     * if no barcode found:
         check if there are different releases in that release group.
         if yes, tell the user to consider providing a barcode/ID/catalog#
     * search on discogs (if not found on mb)
       are we allowed to call get_albums() from the discogs plugin?
-    * print => debug log?
     * settings (extensions (tiff,bmp,etc), verbosity, path stuff?)
     * bad pictures (low resolution, heavy jpeg compression) dont yield barcodes
 
@@ -74,10 +78,11 @@ def _get_debug_str(albuminfo):
     """Gets a string with more information (disambig_string) from a AlbumInfo.
     """
     info = []
+    info.append(albuminfo.album_id)
     info.append(albuminfo.album)
+    info.append(albuminfo.catalognum)
     info.append(disambig_string(albuminfo))
     info.append(albuminfo.data_source)
-    info.append(albuminfo.album_id)
     return u', '.join(info)
 
 
@@ -86,7 +91,10 @@ def _barcodes_to_albuminfos(barcodes):
     """
     releases = []
     for barcode in barcodes:
-        res = musicbrainzngs.search_releases(barcode=barcode, limit=30)
+        res = musicbrainzngs.search_releases(
+            barcode=barcode,
+            catno=barcode,
+            limit=30)
         if res['release-list']:
             for release in res['release-list']:
                 try:
@@ -195,12 +203,9 @@ class Barcode(BeetsPlugin):
         print("Found barcodes: {}".format(' '.join(barcodes)))
         print("Candidates with matching IDs:")
         for index, candidate in enumerate(task.candidates):
-            if candidate.info.album_id in mb_ids:
-                print("{:2d}. {} {}".format(
-                    index + 1,
-                    candidate.info.album_id,
-                    disambig_string(candidate.info)
-                ))
+            albuminfo = candidate.info
+            if albuminfo.album_id in mb_ids:
+                print("{:2d}. {}".format(index + 1, _get_debug_str(albuminfo)))
         print("------------------------")
 
         return None
