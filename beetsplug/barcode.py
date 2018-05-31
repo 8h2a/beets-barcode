@@ -1,35 +1,9 @@
-"""Adds barcode support to the autotagger.
-Requires pyzbar, PIL/Pillow, (and libzbar0).
-
-This plugin searches all image files for barcodes to help in selecting the
-correct release. It's also possible to manually enter a barcode number or
-catalogue number.
-
-If it finds a barcode, it gets the release-id from musicbrainz and
-penalizes releases which don't correspond to the found barcode(s).
-Whenever it finds a barcode, it will print a helpful message, before the
-candidates are shown, to help understanding which candidate corresponds to
-a barcode that was found.
-
-requirements:
-sudo apt-get install libzbar0
-pip install pyzbar Pillow
-
+"""
 TODO:
-    * documentation
-    * proper beetsplug thingy so it can be installed easier
-    * release (pip, installation instructions)?
-
-TODO LATER:
-    * TOC => musicbrainzngs.get_releases_by_discid
-    * if no barcode found:
-        check if there are different releases in that release group.
-        if yes, tell the user to consider providing a barcode/ID/catalog#
     * search on discogs (if not found on mb)
       are we allowed to call get_albums() from the discogs plugin?
-    * settings (extensions (tiff,bmp,etc), verbosity, path stuff?)
+    * settings? (extensions (tiff,bmp,etc), verbosity, path stuff?)
     * bad pictures (low resolution, heavy jpeg compression) dont yield barcodes
-
 """
 from beets.autotag import hooks
 from beets.plugins import BeetsPlugin
