@@ -1,10 +1,10 @@
-"""Adds barcode support to the autotagger. 
+"""Adds barcode support to the autotagger.
 Requires pyzbar, PIL/Pillow, (and libzbar0).
 
 This plugin allows entering barcode as IDs to find the exact release
 and it also searches all image files for barcodes to help in selecting
 the correct release.
-If it finds a barcode, it gets the release-id from musicbrainz and 
+If it finds a barcode, it gets the release-id from musicbrainz and
 penalizes releases which don't correspond to the found barcode(s).
 
 requirements:
@@ -12,18 +12,20 @@ sudo apt-get install libzbar0
 pip install pyzbar Pillow
 
 TODO:
-    * if no barcode found: check if there are different releases in that release group.
-        if yes, tell the user to consider providing a barcode/ID
-    * search on discogs (if not found on mb)
-        or more generic: just make beets call the album_for_id() for all the plugins!
-         + fix discogs plugin to allow searching for barcode
     * documentation
     * proper beetsplug thingy so it can be installed easier
     * release (pip, installation instructions)?
 
+TODO LATER:
+    * if no barcode found:
+        check if there are different releases in that release group.
+        if yes, tell the user to consider providing a barcode/ID/catalog#
+    * search on discogs (if not found on mb)
+      are we allowed to call get_albums() from the discogs plugin?
     * print => debug log?
     * settings (extensions (tiff,bmp,etc), verbosity, path stuff?)
-    * maybe beets.ui.get_path_formats (see beets-copyartifacts)    
+    * bad pictures (low resolution, heavy jpeg compression) dont yield barcodes
+
 """
 from beets.autotag import hooks
 from beets.plugins import BeetsPlugin
@@ -36,7 +38,6 @@ import os.path
 from PIL import Image
 from pyzbar.pyzbar import decode
 from pyzbar.pyzbar import ZBarSymbol
-from sets import Set
 from collections import namedtuple
 
 PICTURE_TYPES = ("jpg", "jpeg", "png")
@@ -44,42 +45,56 @@ BARCODE_TYPES = [ZBarSymbol.EAN13,
                  ZBarSymbol.UPCA,   ZBarSymbol.UPCE,
                  ZBarSymbol.ISBN10, ZBarSymbol.ISBN13]
 
+# Note: "barcodes" and "album_ids" are sets
 MatchData = namedtuple('MatchData', ['barcodes', 'album_ids'])
 _matches = {}  # dict: key = dirname, value = MatchData
 
+
 # utility function
 def _get_files(paths, types):
-    """Gets all files (file names) with a specific type (file extension) 
+    """Gets all files (file names) with a specific type (file extension(s))
     in the provided path(s) and all their sub-directories.
     """
-    files = Set()
+    files = set()
     for path in paths:
         for dirpath, dirnames, filenames in os.walk(path):
             for filename in filenames:
                 try:
                     # try-except because [1] and [1:] can fail
                     file_ext = os.path.splitext(filename)[1].decode('utf8')[1:]
-                    full_path = os.path.join(dirpath, filename)
                     if file_ext in types:
+                        full_path = os.path.join(dirpath, filename)
                         files.add(full_path)
                 except:
                     pass
     return files
 
 
-def _get_debug_str(musicbrainzngs_release):
-    """Gets a string with more information (disambig_string) from a 
-    musicbrainzngs release object.
+def _get_debug_str(albuminfo):
+    """Gets a string with more information (disambig_string) from a AlbumInfo.
     """
-    release = musicbrainzngs_release
-    url_prefix = "https://musicbrainz.org/release/"
-    albuminfo = hooks.album_for_mbid(release['id'])
     info = []
-    info.append(release['title'])
-    if albuminfo:
-        info.append(disambig_string(albuminfo))
-    info.append(u'{}{}'.format(url_prefix, release['id']))
+    info.append(albuminfo.album)
+    info.append(disambig_string(albuminfo))
+    info.append(albuminfo.data_source)
+    info.append(albuminfo.album_id)
     return u', '.join(info)
+
+
+def _barcodes_to_albuminfos(barcodes):
+    """Converts a list of barcodes to a list of AlbumInfo objects
+    """
+    releases = []
+    for barcode in barcodes:
+        res = musicbrainzngs.search_releases(barcode=barcode, limit=30)
+        if res['release-list']:
+            for release in res['release-list']:
+                try:
+                    releases.append(hooks.album_for_mbid(release['id']))
+                except:
+                    pass
+        # TODO else discogs?
+    return releases
 
 
 def _process_items(items):
@@ -90,34 +105,34 @@ def _process_items(items):
     The function will not re-scan already processed paths, instead it will
     simply look up the values from "_matches".
     """
-    release_ids = Set()
+    release_ids = set()
 
     # get paths from music tracks
     # (and directly get MB-IDs if we already have them)
-    paths_original = Set()
-    for i in items:
-        path = os.path.dirname(i.path)
+    paths_original = set()
+    for item in items:
+        path = os.path.dirname(item.path)
         if path not in _matches:
             paths_original.add(path)
         else:
             release_ids.update(_matches[path].album_ids)
 
-    # append parent paths (if they dont contain more (other) media files
-    # other than those we already know about)
+    # append parent paths if they dont contain more (other) media files
+    # (other than those we already know about)
     def _path_is_probably_ok(path, items):
         return len(_get_files([path], TYPES)) <= len(items)
 
-    paths_updated = Set(paths_original)  # copy the original set
-    for path in paths_original:
-        parentdir = os.path.dirname(path)
+    paths = set(paths_original)  # copy the original set
+    parentpaths = set(map(os.path.dirname, paths_original))
+    for parentdir in parentpaths:
         if _path_is_probably_ok(parentdir, items):
-            paths_updated.add(parentdir)
+            paths.add(parentdir)
 
     # get pictures from paths
-    files_to_decode = _get_files(paths_updated, PICTURE_TYPES)
+    files_to_decode = _get_files(paths, PICTURE_TYPES)
 
     # decode all pictures to find barcodes
-    barcodes = Set()
+    barcodes = set()
     for filepath in files_to_decode:
         try:
             results = decode(Image.open(filepath), BARCODE_TYPES)
@@ -126,15 +141,13 @@ def _process_items(items):
         except:
             pass
 
-    # convert barcodes to MB-IDs
-    for barcode in barcodes:
-        res = musicbrainzngs.search_releases(barcode=barcode, limit=30)
-        if res['release-list']:
-            for release in res['release-list']:
-                # print(u"{} => {}".format(barcode, _get_debug_str(release)))
-                release_ids.add(release['id'])
+    # convert barcodes to MB-IDs and add them to our set
+    albuminfos = _barcodes_to_albuminfos(barcodes)
+    release_ids.update(set(map(lambda info: info.album_id, albuminfos)))
 
-    # add those paths and MB-IDs to our global dict
+    # add those paths and MB-IDs to our global dict:
+    # Note we're using "paths_original" instead of "paths", which would also
+    # contain their parent-paths, to match them to the item paths later.
     for path in paths_original:
         _matches[path] = MatchData(barcodes, release_ids)
 
@@ -145,7 +158,7 @@ class Barcode(BeetsPlugin):
     def __init__(self):
         super(Barcode, self).__init__()
         self.config.add({
-            'source_weight': 1.0,
+            'source_weight': 0.9,
         })
         self.register_listener('import_task_start', self.import_task_start)
         self.register_listener('before_choose_candidate', self.before_choose)
@@ -160,17 +173,17 @@ class Barcode(BeetsPlugin):
         This is useful to quickly see if the chosen release is the correct one.
         """
 
-        # task.candidates = list of AlbumMatch
+        # Note: task.candidates = list of AlbumMatch
         if not task.candidates:
             return None
 
-        mb_ids = Set()
-        barcodes = Set()
+        mb_ids = set()
+        barcodes = set()
         for candidate in task.candidates:
             # TODO we don't have to check ALL candidates,
             # because they all use the same file paths..
             tracks = candidate.mapping
-            paths = Set(map(lambda i: os.path.dirname(i.path), tracks))
+            paths = set(map(lambda i: os.path.dirname(i.path), tracks))
             for path in paths:
                 if path in _matches:
                     mb_ids.update(_matches[path].album_ids)
@@ -184,7 +197,7 @@ class Barcode(BeetsPlugin):
         for index, candidate in enumerate(task.candidates):
             if candidate.info.album_id in mb_ids:
                 print("{:2d}. {} {}".format(
-                    index + 1, 
+                    index + 1,
                     candidate.info.album_id,
                     disambig_string(candidate.info)
                 ))
@@ -196,9 +209,12 @@ class Barcode(BeetsPlugin):
         release_ids = _process_items(items)
         releases = []
         for id in release_ids:
-            albuminfo = hooks.album_for_mbid(id)
-            if albuminfo:
-                releases.append(albuminfo)
+            try:  # album_for_mbid may raise a MusicBrainzAPIError
+                albuminfo = hooks.album_for_mbid(id)
+                if albuminfo:
+                    releases.append(albuminfo)
+            except:
+                pass
         return releases
 
     def album_distance(self, items, album_info, mapping):
@@ -206,8 +222,8 @@ class Barcode(BeetsPlugin):
 
         # Add a penalty if these items have a barcode, but the album_id
         # is does not correspond to the barcode(s).
-        paths = Set(map(lambda i: os.path.dirname(i.path), items))
-        release_ids = Set()
+        paths = set(map(lambda item: os.path.dirname(item.path), items))
+        release_ids = set()
         for path in paths:
             if path in _matches:
                 release_ids.update(_matches[path].album_ids)
@@ -223,24 +239,21 @@ class Barcode(BeetsPlugin):
         """Looks up the barcode in the musicbrainz database and returns the
         matching album (if the barcode corresponds to exactly one release).
         """
-        try:
-            res = musicbrainzngs.search_releases(barcode=album_id, limit=30)
-            if not res['release-list']:
-                return None
+        albuminfos = _barcodes_to_albuminfos([album_id])
+
+        if len(albuminfos) == 0:
+            return None
+
+        if len(albuminfos) > 1:
+            print("Found multiple matching releases:")
+            for albuminfo in albuminfos:
+                print(_get_debug_str(albuminfo))
+            return None
+
+        # return an AlbumInfo if we found exactly one release
+        try:  # album_for_mbid may raise a MusicBrainzAPIError
+            return albuminfos[0]
         except:
-            return None
-
-        release_list = res['release-list']
-        if len(release_list) > 1:
-            for release in release_list:
-                print(_get_debug_str(release))
-            return None
-
-        if len(release_list) == 1:
-            # only return a release if we have exactly one release:
-            try:
-                return hooks.album_for_mbid(release_list[0]['id'])
-            except:
-                pass
+            pass
 
         return None
