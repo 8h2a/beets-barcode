@@ -179,7 +179,7 @@ class Barcode(BeetsPlugin):
         for index, candidate in enumerate(task.candidates):
             albuminfo = candidate.info
             if albuminfo.album_id in mb_ids:
-                print("{:2d}. {}".format(index + 1, _get_debug_str(albuminfo)))
+                print(u"{:2d}. {}".format(index + 1, _get_debug_str(albuminfo)))
         print("------------------------")
 
         return None
