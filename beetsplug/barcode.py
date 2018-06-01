@@ -10,7 +10,6 @@ from beets.plugins import BeetsPlugin
 from beets.ui.commands import PromptChoice
 from beets.mediafile import TYPES
 from beets.ui.commands import disambig_string
-from beets import config
 import musicbrainzngs
 import os.path
 from PIL import Image
@@ -139,9 +138,6 @@ def _process_items(items):
 class Barcode(BeetsPlugin):
     def __init__(self):
         super(Barcode, self).__init__()
-        self.config.add({
-            'source_weight': 0.9,
-        })
         self.register_listener('import_task_start', self.import_task_start)
         self.register_listener('before_choose_candidate', self.before_choose)
 
