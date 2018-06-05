@@ -1,7 +1,5 @@
 """
 TODO:
-    * search on discogs (if not found on mb)
-      are we allowed to call get_albums() from the discogs plugin?
     * settings? (extensions (tiff,bmp,etc), verbosity, path stuff?)
     * bad pictures (low resolution, heavy jpeg compression) dont yield barcodes
 """
@@ -39,7 +37,7 @@ def _get_files(paths, types):
                 try:
                     # try-except because [1] and [1:] can fail
                     file_ext = os.path.splitext(filename)[1].decode('utf8')[1:]
-                    if file_ext in types:
+                    if file_ext.lower() in types:
                         full_path = os.path.join(dirpath, filename)
                         files.add(full_path)
                 except:
@@ -48,14 +46,17 @@ def _get_files(paths, types):
 
 
 def _get_debug_str(albuminfo):
-    """Gets a string with more information (disambig_string) from a AlbumInfo.
+    """Gets a string with more information (disambig_string) from an
+    AlbumInfo object.
     """
     info = []
-    info.append(albuminfo.album_id)
-    info.append(albuminfo.album)
-    info.append(albuminfo.catalognum)
+    if albuminfo.album_id:
+        info.append(str(albuminfo.album_id))
+    if albuminfo.album:
+        info.append(str(albuminfo.album))
+    if albuminfo.catalognum:
+        info.append(str(albuminfo.catalognum))
     info.append(disambig_string(albuminfo))
-    info.append(albuminfo.data_source)
     return u', '.join(info)
 
 
@@ -74,7 +75,6 @@ def _barcodes_to_albuminfos(barcodes):
                     releases.append(hooks.album_for_mbid(release['id']))
                 except:
                     pass
-        # TODO else discogs?
     return releases
 
 
@@ -155,7 +155,7 @@ class Barcode(BeetsPlugin):
         if not task.candidates:
             return None
 
-        mb_ids = set()
+        ids = set()
         barcodes = set()
         for candidate in task.candidates:
             # TODO we don't have to check ALL candidates,
@@ -164,23 +164,29 @@ class Barcode(BeetsPlugin):
             paths = set(map(lambda i: os.path.dirname(i.path), tracks))
             for path in paths:
                 if path in _matches:
-                    mb_ids.update(_matches[path].album_ids)
+                    ids.update(_matches[path].album_ids)
                     barcodes.update(_matches[path].barcodes)
-        if len(mb_ids) == 0:
+        if len(barcodes) == 0:
             return None
 
         print("------------------------")
-        print("Found barcodes: {}".format(' '.join(barcodes)))
-        print("Candidates with matching IDs:")
-        for index, candidate in enumerate(task.candidates):
-            albuminfo = candidate.info
-            if albuminfo.album_id in mb_ids:
-                print(u"{:2d}. {}".format(index + 1, _get_debug_str(albuminfo)))
+        if len(ids) == 0:
+            print("Found barcodes but no matching releases: {}".format(
+                ' '.join(barcodes)))
+        else:
+            print("Found barcodes: {}".format(' '.join(barcodes)))
+            print("Candidates with matching IDs:")
+            for index, candidate in enumerate(task.candidates):
+                info = candidate.info
+                if info.album_id in ids:
+                    print(u"{:2d}. {}".format(index + 1, _get_debug_str(info)))
         print("------------------------")
 
         return None
 
     def candidates(self, items, artist, album, va_likely):
+        # TODO we already have album infos in _process_itemsself.
+        # we should cache and reuse them.
         release_ids = _process_items(items)
         releases = []
         for id in release_ids:
@@ -196,7 +202,7 @@ class Barcode(BeetsPlugin):
         dist = hooks.Distance()
 
         # Add a penalty if these items have a barcode, but the album_id
-        # is does not correspond to the barcode(s).
+        # does not correspond to the barcode(s).
         paths = set(map(lambda item: os.path.dirname(item.path), items))
         release_ids = set()
         for path in paths:
