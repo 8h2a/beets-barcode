@@ -27,4 +27,7 @@ for instructions.
 You can then [enable the plugin in beet's config.yaml](https://beets.readthedocs.io/en/latest/plugins/index.html#using-plugins):
 ```yaml
 plugins: barcode
+match:
+    distance_weights:
+        barcode: 1.0
 ```

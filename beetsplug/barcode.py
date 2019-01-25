@@ -3,6 +3,7 @@ TODO:
     * settings? (extensions (tiff,bmp,etc), verbosity, path stuff?)
     * bad pictures (low resolution, heavy jpeg compression) dont yield barcodes
 """
+from beets import ui
 from beets.autotag import hooks
 from beets.plugins import BeetsPlugin
 from beets.ui.commands import PromptChoice
@@ -51,11 +52,11 @@ def _get_debug_str(albuminfo):
     """
     info = []
     if albuminfo.album_id:
-        info.append(str(albuminfo.album_id))
+        info.append(albuminfo.album_id)
     if albuminfo.album:
-        info.append(str(albuminfo.album))
+        info.append(albuminfo.album)
     if albuminfo.catalognum:
-        info.append(str(albuminfo.catalognum))
+        info.append(albuminfo.catalognum)
     info.append(disambig_string(albuminfo))
     return u', '.join(info)
 
@@ -77,6 +78,18 @@ def _barcodes_to_albuminfos(barcodes):
                     pass
     return releases
 
+def _files_to_barcodes(filenames):
+    """Decodes a list of filenames and returns a set of barcodes."""
+    # decode all pictures to find barcodes
+    barcodes = set()
+    for filepath in filenames:
+        try:
+            results = decode(Image.open(filepath), BARCODE_TYPES)
+            for r in results:
+                barcodes.add(r.data)
+        except:
+            pass
+    return barcodes
 
 def _process_items(items):
     """Find barcodes from image files from the provided list of items.
@@ -113,14 +126,7 @@ def _process_items(items):
     files_to_decode = _get_files(paths, PICTURE_TYPES)
 
     # decode all pictures to find barcodes
-    barcodes = set()
-    for filepath in files_to_decode:
-        try:
-            results = decode(Image.open(filepath), BARCODE_TYPES)
-            for r in results:
-                barcodes.add(r.data)
-        except:
-            pass
+    barcodes = _files_to_barcodes(files_to_decode)
 
     # convert barcodes to MB-IDs and add them to our set
     albuminfos = _barcodes_to_albuminfos(barcodes)
@@ -169,23 +175,27 @@ class Barcode(BeetsPlugin):
         if len(barcodes) == 0:
             return None
 
-        print("------------------------")
+        #print("------------------------")
         if len(ids) == 0:
-            print("Found barcodes but no matching releases: {}".format(
+            print("{}: {}".format(
+                ui.colorize('text_warning', 
+                    "Found barcode(s) but no matching releases"),
                 ' '.join(barcodes)))
         else:
-            print("Found barcodes: {}".format(' '.join(barcodes)))
-            print("Candidates with matching IDs:")
-            for index, candidate in enumerate(task.candidates):
-                info = candidate.info
-                if info.album_id in ids:
-                    print(u"{:2d}. {}".format(index + 1, _get_debug_str(info)))
-        print("------------------------")
+            print("{}: {}".format(
+                ui.colorize('text_success', "Found barcode(s)"),
+                ' '.join(barcodes)))
+        #    print("Candidates with matching IDs:")
+        #    for index, candidate in enumerate(task.candidates):
+        #        info = candidate.info
+        #        if info.album_id in ids:
+        #            print(u"{:2d}. {}".format(index + 1, _get_debug_str(info)))
+        #print("------------------------")
 
         return None
 
     def candidates(self, items, artist, album, va_likely):
-        # TODO we already have album infos in _process_itemsself.
+        # TODO we already have album infos in _process_items.
         # we should cache and reuse them.
         release_ids = _process_items(items)
         releases = []
@@ -212,7 +222,9 @@ class Barcode(BeetsPlugin):
         # Penalty only if we actually found barcodes for this path,
         # to avoid penalizing all relases if we haven't found any barcodes.
         if len(release_ids) != 0:
-            dist.add_expr('album_id', album_info.album_id not in release_ids)
+            dist.add_expr('barcode', album_info.album_id not in release_ids)
+            if album_info.album_id in release_ids:
+                album_info.data_source+='+' + ui.colorize('text_success', 'barcode')
 
         return dist
 
